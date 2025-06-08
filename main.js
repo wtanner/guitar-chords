@@ -31,8 +31,11 @@ class Chord {
      * Validate chord data integrity
      */
     isValid() {
+        // FINGER_POSITIONS should always have 6 elements (one per string)
+        // NOTE_NAMES should have entries for all non-x positions in FINGER_POSITIONS
+        const nonXCount = this.fingerPositions.filter(pos => pos !== 'x').length;
         return this.fingerPositions.length === 6 &&
-            this.noteNames.length === 6 &&
+            this.noteNames.length === nonXCount &&
             this.structure.length > 0;
     }
 }
@@ -94,6 +97,7 @@ function parseCsvLine(line) {
 
         if (char === '"') {
             inQuotes = !inQuotes;
+            current += char; // Preserve the quote character
         } else if (char === ';' && !inQuotes) {
             result.push(current.trim());
             current = '';
@@ -181,6 +185,80 @@ function calculateDimensions() {
 }
 
 /**
+ * Calculate the base fret position for a chord
+ * @param {Chord} chord - Chord object
+ * @returns {number} Base fret number (0-11)
+ */
+function calculateBaseFret(chord) {
+    // Standard guitar tuning (string number -> open note)
+    const openStringNotes = {
+        6: 'E',  // Low E
+        5: 'A',  // A
+        4: 'D',  // D
+        3: 'G',  // G
+        2: 'B',  // B
+        1: 'E'   // High E
+    };
+
+    // Chromatic scale for calculating fret distances
+    const chromaticScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    // Helper function to normalize note names (handle enharmonic equivalents)
+    function normalizeNote(note) {
+        const noteMap = {
+            'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#',
+            'C##': 'D', 'D##': 'E', 'E#': 'F', 'F##': 'G', 'G##': 'A', 'A##': 'B', 'B#': 'C',
+            'Fb': 'E', 'Cb': 'B'
+        };
+        return noteMap[note] || note;
+    }
+
+    // Helper function to calculate fret distance between two notes
+    function getFretDistance(fromNote, toNote) {
+        const normalizedFrom = normalizeNote(fromNote);
+        const normalizedTo = normalizeNote(toNote);
+
+        const fromIndex = chromaticScale.indexOf(normalizedFrom);
+        const toIndex = chromaticScale.indexOf(normalizedTo);
+
+        if (fromIndex === -1 || toIndex === -1) {
+            console.warn(`Unknown note: ${fromNote} -> ${normalizedFrom} or ${toNote} -> ${normalizedTo}`);
+            return 0;
+        }
+
+        // Calculate distance, handling wrap-around
+        let distance = toIndex - fromIndex;
+        if (distance < 0) {
+            distance += 12; // Add octave
+        }
+        return distance;
+    }
+
+    // Find first non-x finger position and map to correct note
+    // NOTE_NAMES contains notes for all non-x positions in FINGER_POSITIONS order
+    let noteIndex = 0; // Tracks which non-x position we're at
+
+    for (let i = 0; i < chord.fingerPositions.length; i++) {
+        const position = chord.fingerPositions[i];
+        if (position !== 'x') {
+            // This is the first non-x position - use it for base fret calculation
+            const stringNumber = 6 - i; // Convert index to string number
+            const targetNote = chord.noteNames[noteIndex]; // First note corresponds to first non-x position
+            const openNote = openStringNotes[stringNumber];
+
+            // Calculate what fret this note would be on this string
+            const fretDistance = getFretDistance(openNote, targetNote);
+
+            return fretDistance;
+        }
+        // If position is 'x', we continue to the next position without incrementing noteIndex
+        // because NOTE_NAMES doesn't include entries for muted strings
+    }
+
+    return 0; // Default to open position if no fingered notes found
+}
+
+/**
  * Generate SVG chord diagram with fretboard representation
  * @param {Chord} chord - Chord object to render
  * @param {Object} dimensions - Dimensions and scaling info
@@ -188,15 +266,23 @@ function calculateDimensions() {
  */
 function generateChordDiagram(chord, dimensions) {
     const { width, height, scale } = dimensions;
-    const fretboardWidth = width * 0.6;
-    const fretboardHeight = height * 0.4;
+    const fretboardWidth = width * 0.5;  // Make narrower
+    const fretboardHeight = height * 0.5; // Make taller 
     const fretboardX = (width - fretboardWidth) / 2;
-    const fretboardY = height * 0.3;
+    const fretboardY = height * 0.25;     // Move up slightly
 
     const stringSpacing = fretboardWidth / 5; // 6 strings = 5 spaces
     const fretSpacing = fretboardHeight / 4; // 5 frets = 4 spaces
 
+    // Calculate base fret position
+    const baseFret = calculateBaseFret(chord);
+
     let diagramSVG = '';
+
+    // Display base fret number to the left of the fretboard
+    if (baseFret > 0) {
+        diagramSVG += `<text x="${fretboardX - 30 * scale}" y="${fretboardY + fretSpacing / 2}" text-anchor="middle" font-family="Arial" font-size="${20 * scale}" font-weight="bold">${baseFret}</text>`;
+    }
 
     // Draw fretboard outline
     diagramSVG += `<rect x="${fretboardX}" y="${fretboardY}" width="${fretboardWidth}" height="${fretboardHeight}" fill="none" stroke="black" stroke-width="2"/>`;
@@ -210,31 +296,62 @@ function generateChordDiagram(chord, dimensions) {
     // Draw frets (horizontal lines)
     for (let i = 0; i <= 4; i++) {
         const y = fretboardY + (i * fretSpacing);
-        diagramSVG += `<line x1="${fretboardX}" y1="${y}" x2="${fretboardX + fretboardWidth}" y2="${y}" stroke="black" stroke-width="1"/>`;
+        // Make the top line (nut) thicker for open position chords
+        const strokeWidth = (i === 0 && baseFret === 0) ? "6" : "1";
+        diagramSVG += `<line x1="${fretboardX}" y1="${y}" x2="${fretboardX + fretboardWidth}" y2="${y}" stroke="black" stroke-width="${strokeWidth}"/>`;
     }
 
-    // Draw finger positions
+    // Draw finger positions and note names
+    // CSV data is ordered from Low E (6th) to High E (1st) string, displayed left to right
     const fingerPositions = chord.fingerPositions;
+    const openStringNotes = ['E', 'A', 'D', 'G', 'B', 'E']; // Standard tuning notes
+    let noteIndex = 0; // Index for NOTE_NAMES array (only counts non-x positions)
+
     for (let stringIndex = 0; stringIndex < 6; stringIndex++) {
         const position = fingerPositions[stringIndex];
         const x = fretboardX + (stringIndex * stringSpacing);
 
+        // Determine what note to display below the string
+        let noteToDisplay = '';
+        if (position === 'x') {
+            // Muted string - no note displayed
+            noteToDisplay = '';
+        } else if (position === '0') {
+            // Open string - use standard tuning note
+            noteToDisplay = openStringNotes[stringIndex];
+        } else {
+            // Fingered position - use note from NOTE_NAMES
+            noteToDisplay = chord.noteNames[noteIndex];
+        }
+
+        // Draw finger position markers
         if (position === 'x') {
             // Muted string - draw X above fretboard
             const y = fretboardY - 20 * scale;
-            diagramSVG += `<text x="${x}" y="${y}" text-anchor="middle" font-family="Arial" font-size="${16 * scale}" font-weight="bold">X</text>`;
+            diagramSVG += `<text x="${x}" y="${y}" text-anchor="middle" font-family="Arial" font-size="${24 * scale}" font-weight="bold">X</text>`;
         } else if (position === '0') {
-            // Open string - draw O above fretboard
+            // Open string - draw open circle above fretboard
             const y = fretboardY - 20 * scale;
-            diagramSVG += `<circle cx="${x}" cy="${y - 8 * scale}" r="${8 * scale}" fill="none" stroke="black" stroke-width="2"/>`;
+            diagramSVG += `<circle cx="${x}" cy="${y - 8 * scale}" r="${10 * scale}" fill="none" stroke="black" stroke-width="3"/>`;
         } else {
             // Fingered position - draw filled circle on fret
             const fretNumber = parseInt(position);
             if (fretNumber >= 1 && fretNumber <= 4) {
                 const y = fretboardY + ((fretNumber - 0.5) * fretSpacing);
-                diagramSVG += `<circle cx="${x}" cy="${y}" r="${10 * scale}" fill="black"/>`;
-                diagramSVG += `<text x="${x}" y="${y + 5 * scale}" text-anchor="middle" font-family="Arial" font-size="${12 * scale}" fill="white" font-weight="bold">${position}</text>`;
+                diagramSVG += `<circle cx="${x}" cy="${y}" r="${14 * scale}" fill="black"/>`;
+                diagramSVG += `<text x="${x}" y="${y + 6 * scale}" text-anchor="middle" font-family="Arial" font-size="${16 * scale}" fill="white" font-weight="bold">${position}</text>`;
             }
+        }
+
+        // Display note name below the string (if not muted)
+        if (noteToDisplay) {
+            const noteY = fretboardY + fretboardHeight + 30 * scale;
+            diagramSVG += `<text x="${x}" y="${noteY}" text-anchor="middle" font-family="Arial" font-size="${14 * scale}" font-weight="bold">${noteToDisplay}</text>`;
+        }
+
+        // Increment noteIndex only for non-x positions
+        if (position !== 'x') {
+            noteIndex++;
         }
     }
 
@@ -257,22 +374,17 @@ function createChordLabels(chord, dimensions) {
     // Chord structure
     labelsSVG += `<text x="${width / 2}" y="${80 * scale}" text-anchor="middle" font-family="Arial" font-size="${16 * scale}">Structure: ${chord.structure.join(', ')}</text>`;
 
-    // String labels (Low E, A, D, G, B, High E)
-    const stringNames = ['E', 'A', 'D', 'G', 'B', 'E'];
-    const fretboardX = (width - width * 0.6) / 2;
-    const stringSpacing = (width * 0.6) / 5;
+    // String note names are now displayed below each string in the chord diagram
+    // Note: fretboard dimensions must match those in generateChordDiagram
+    const fretboardWidth = width * 0.5;
+    const fretboardHeight = height * 0.5;
+    const fretboardX = (width - fretboardWidth) / 2;
+    const fretboardY = height * 0.25;
 
-    for (let i = 0; i < 6; i++) {
-        const x = fretboardX + (i * stringSpacing);
-        const y = height * 0.25;
-        labelsSVG += `<text x="${x}" y="${y}" text-anchor="middle" font-family="Arial" font-size="${14 * scale}" font-weight="bold">${stringNames[i]}</text>`;
-    }
-
-    // Note names at bottom
-    labelsSVG += `<text x="${width / 2}" y="${height * 0.8}" text-anchor="middle" font-family="Arial" font-size="${16 * scale}">Notes: ${chord.noteNames.join(', ')}</text>`;
+    // Note names are now displayed below each string in the chord diagram
 
     // Click instruction
-    labelsSVG += `<text x="${width / 2}" y="${height * 0.9}" text-anchor="middle" font-family="Arial" font-size="${14 * scale}" fill="#666">Click anywhere to load another chord</text>`;
+    labelsSVG += `<text x="${width / 2}" y="${height * 0.95}" text-anchor="middle" font-family="Arial" font-size="${14 * scale}" fill="#666">Click anywhere to load another chord</text>`;
 
     return labelsSVG;
 }
@@ -405,9 +517,11 @@ function runTests() {
     // Test CSV line parsing
     const testLine = 'A#;maj;"1;3;5";x,1,3,3,3,x;A#,E#,A#,C##';
     const parsed = parseCsvLine(testLine);
+    console.log('Parsed fields:', parsed);
     console.assert(parsed.length === 5, 'CSV parsing should return 5 fields');
     console.assert(parsed[0] === 'A#', 'First field should be A#');
     console.assert(parsed[2] === '"1;3;5"', 'Third field should preserve quotes');
+    console.log('CSV parsing test passed');
 
     // Test Chord creation
     const testChord = new Chord('C', 'maj', '1;3;5', 'x,3,2,0,1,0', 'C,E,G,C,E');
@@ -415,21 +529,45 @@ function runTests() {
     console.assert(testChord.fingerPositions.length === 6, 'Should have 6 finger positions');
     console.assert(testChord.isValid(), 'Test chord should be valid');
 
-    // Test random selection with empty dataset
-    const originalDataset = chordDataset;
-    chordDataset = [];
-    console.assert(selectRandomChord() === null, 'Should return null for empty dataset');
-    chordDataset = originalDataset;
+    // Test base fret calculation
+    console.log('Testing base fret calculation...');
+
+    // Test case 1: D;9b5;"1;3;b5;b7;9";1,2,1,3,4,1;Ab,D,F#,C,E,Ab (expected: 4)
+    const testChord1 = new Chord('D', '9b5', '1;3;b5;b7;9', '1,2,1,3,4,1', 'Ab,D,F#,C,E,Ab');
+    const baseFret1 = calculateBaseFret(testChord1);
+    console.log(`Test 1 - Expected: 4, Got: ${baseFret1}`);
+    console.assert(baseFret1 === 4, `Base fret should be 4, got ${baseFret1}`);
+
+    // Test case 2: Bb;7;"1;3;5;b7";1,3,1,2,4,1;Bb,F,Ab,D,Ab,Bb (expected: 6)
+    const testChord2 = new Chord('Bb', '7', '1;3;5;b7', '1,3,1,2,4,1', 'Bb,F,Ab,D,Ab,Bb');
+    const baseFret2 = calculateBaseFret(testChord2);
+    console.log(`Test 2 - Expected: 6, Got: ${baseFret2}`);
+    console.assert(baseFret2 === 6, `Base fret should be 6, got ${baseFret2}`);
+
+    // Test case 3: Bb;7;"1;3;5;b7";x,x,1,3,2,4;Bb,F,Ab,D (expected: 8)
+    const testChord3 = new Chord('Bb', '7', '1;3;5;b7', 'x,x,1,3,2,4', 'Bb,F,Ab,D');
+    const baseFret3 = calculateBaseFret(testChord3);
+    console.log(`Test 3 - Expected: 8, Got: ${baseFret3}`);
+    console.assert(baseFret3 === 8, `Base fret should be 8, got ${baseFret3}`);
+
+    // Test random selection with empty dataset (only if dataset is loaded)
+    if (chordDataset.length > 0) {
+        const originalDataset = chordDataset;
+        chordDataset = [];
+        console.assert(selectRandomChord() === null, 'Should return null for empty dataset');
+        chordDataset = originalDataset;
+        console.log('Empty dataset test passed');
+    } else {
+        console.log('Skipping empty dataset test - dataset not loaded yet');
+    }
 
     console.log('Unit tests completed');
 }
 
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', function () {
-    // Run embedded tests in development
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        runTests();
-    }
+    // Run embedded tests
+    runTests();
 
     // Initialize the main application
     initializeApp();

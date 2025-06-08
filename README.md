@@ -1,4 +1,4 @@
-# Guitar Chords Application - Design Document
+# Random Guitar Chords
 
 ## Overview
 
@@ -135,15 +135,13 @@ A self-contained, statically-served web application for guitar chord learning an
 
 ## Development Phases
 
-### Phase 1: Core Infrastructure
+### Phase 1: Core Infrastructure ✅
 1. Set up basic HTML structure
 2. Implement CSV parsing functionality in `main.js`
 3. Create random chord selection logic
 
-### Phase 2: Visual Rendering
-1. Develop SVG generation functions
-2. Implement chord diagram rendering
-3. Create responsive layout calculations
+### Phase 2: Chord Diagram ✅
+1. Implement chord diagram rendering
 
 ### Phase 3: Musical Notation
 1. Add treble clef rendering functions
