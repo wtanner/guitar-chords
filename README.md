@@ -4,15 +4,16 @@
 
 A self-contained, statically-served web application for guitar chord learning and experimentation. The application displays randomly selected guitar chords with visual diagrams, finger positions, and musical notation to help users discover and learn new chord structures.
 
+
 ## Functional Requirements
 
 ### F1: Single Chord Display
 - **Requirement**: Display one chord at a time with comprehensive information
 - **Components**:
   - Chord name (e.g., "C Major", "Am7", "F#dim")
-  - Guitar chord diagram showing fret positions
+  - Guitar chord diagram showing fret positions with accurate base fret calculation
   - Finger placement indicators (1-4 for fingers, x for muted, 0 for open)
-  - Standard musical notation representation as quarter notes on treble clef
+  - Base fret indicator for higher position chords
 
 ### F2: Random Chord Loading
 - **Requirement**: Load a randomly selected chord when the page is accessed
@@ -52,8 +53,9 @@ A self-contained, statically-served web application for guitar chord learning an
 
 ```
 ├── index.html          # Main application page
-├── chord-fingers.csv   # UC Irvine dataset (downloaded)
 ├── main.js            # Single JavaScript file containing all functionality
+├── chord-fingers.csv   # UC Irvine dataset (2,633 chords)
+├── test.js            # Comprehensive test suite
 └── README.md          # This design document
 ```
 
@@ -94,6 +96,15 @@ A self-contained, statically-served web application for guitar chord learning an
 - `generateSVG()`: Coordinate all SVG generation
 - `insertSVGIntoDOM()`: Handle SVG insertion into page
 
+#### 5. Fret Position Calculator
+
+**Core Algorithm**: The application includes sophisticated fret position calculation with two main functions:
+
+- `calculateAbsoluteFretPositions()`: Computes actual fret positions from chord data, handling enharmonic equivalents (Db = C#) and applying octave adjustment when computed positions are too low relative to other strings
+- `normalizeFretPositions()`: Optimizes chord diagrams for 5-fret display while preserving open strings, calculating base fret indicators for higher positions
+
+**Key Features**: Handles complex note names, maintains open string integrity during normalization, and accommodates chords spanning up to 5 frets with intelligent positioning algorithms.
+
 ### Responsive Design Strategy
 
 #### Viewport Adaptation
@@ -122,10 +133,12 @@ A self-contained, statically-served web application for guitar chord learning an
 ## Data Integration
 
 ### [UC Irvine Dataset](https://archive.ics.uci.edu/dataset/575/guitar+chords+finger+positions) Integration
-- **Source**: Guitar Chords finger positions dataset (2,633 chords).
+- **Source**: Guitar Chords finger positions dataset (2,633 chords) [1]
 - **Format**: CSV with 5 features per chord
 - **Processing**: Client-side parsing without external CSV libraries
 - **Storage**: Static file included in repository
+
+**Reference**: [1] "Guitar Chords finger positions," UCI Machine Learning Repository, 2020. [Online]. Available: https://doi.org/10.24432/C5RG8K.
 
 ### Chord Selection Algorithm
 - Load dataset into memory on page initialization
@@ -173,7 +186,13 @@ A self-contained, statically-served web application for guitar chord learning an
 ## Quality Assurance
 
 ### Testing Strategy
-- Simple unit tests embedded alongside JavaScript functions
+- **Comprehensive test suite** in `test.js` covering:
+  - CSV parsing and chord creation
+  - Fret calculation algorithms (absolute positions, normalization)
+  - Open string preservation behavior
+  - Edge cases (all muted, complex note names, 5-fret spans)
+  - Integration scenarios combining multiple features
+- **Run tests**: `node test.js`
 - Basic cross-browser compatibility verification
 - Responsive design validation across devices
 - Dataset integrity verification
